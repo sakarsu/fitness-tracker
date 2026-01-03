@@ -6,7 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import date, datetime, timedelta
 
 # --- 1. CONFIG & GOOGLE SHEETS ---
-st.set_page_config(page_title="Cloud Fitness v11", layout="wide")
+st.set_page_config(page_title="Cloud Fitness v12", layout="wide")
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -20,8 +20,22 @@ def load_data():
         sheet = get_google_sheet()
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
+        
         if not df.empty:
-            df['Date'] = pd.to_datetime(df['Date'])
+            # FIX 1: Force Date Conversion
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+            
+            # FIX 2: Force Numeric Conversion (Prevents Crash)
+            # Google Sheets sometimes sends numbers as strings. We must fix this.
+            numeric_cols = [
+                'Duration_Min', 'Distance_Km', 'Speed_Kmh', 'Avg_HR', 
+                'Jog_Split_Min', 'Walk_Split_Min', 
+                'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'
+            ]
+            for col in numeric_cols:
+                # 'coerce' turns bad text into NaN, then we fill with 0
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                
         return df
     except Exception:
         return pd.DataFrame()
@@ -116,7 +130,7 @@ with tab1:
         })
         st.success("Saved!")
 
-# --- TAB 2: DASHBOARD (Complete) ---
+# --- TAB 2: DASHBOARD ---
 with tab2:
     if st.button("🔄 Refresh Data"): st.cache_data.clear()
     
@@ -159,16 +173,15 @@ with tab2:
             m3.metric("Sessions", len(df))
             st.divider()
 
-            # --- 1. CONSISTENCY CALENDAR (New!) ---
+            # --- 1. CONSISTENCY CALENDAR ---
             st.subheader("🗓️ Consistency Streak")
             
-            # Prepare data for punch card
             df_cal = df.copy()
             df_cal['DayOfWeek'] = df_cal['Date'].dt.day_name()
-            # Sort days: Monday at top (or bottom depending on preference, standard is Mon-Sun)
             days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
             df_cal['DayOfWeek'] = pd.Categorical(df_cal['DayOfWeek'], categories=days_order[::-1], ordered=True)
             
+            # Use discrete map for Heatmap
             fig_cal = px.scatter(
                 df_cal, 
                 x="Date", 
@@ -176,9 +189,11 @@ with tab2:
                 size="Duration_Min", 
                 color="Duration_Min",
                 color_continuous_scale="Greens",
-                title="Workout Heatmap (Darker = Longer)",
+                title="Workout Heatmap",
                 height=300
             )
+            # FIX FOR X-AXIS: Ensure it treats X as Date
+            fig_cal.update_xaxes(type='date', tickformat="%b %d")
             fig_cal.update_layout(xaxis_title=None, yaxis_title=None)
             st.plotly_chart(fig_cal, use_container_width=True)
 
@@ -196,12 +211,25 @@ with tab2:
                 df_splits = df_splits[df_splits['Minutes'] > 0]
                 st.plotly_chart(px.bar(df_splits, x='Date', y='Minutes', color='Split_Type', title="Jog vs Walk Ratio", color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}), use_container_width=True)
 
-            # --- 3. EFFICIENCY ---
+            # --- 3. EFFICIENCY (CRASH FIXED) ---
             st.divider()
             st.subheader("Efficiency Analysis")
+            
+            # Ensure filtering works on numeric data
             df_move = df[ (df['Speed_Kmh'] > 0) & (df['Avg_HR'] > 0) ]
+            
             if not df_move.empty:
-                st.plotly_chart(px.scatter(df_move, x='Avg_HR', y='Speed_Kmh', color='Type', size='Distance_Km', hover_data=['Date', 'Notes'], title="Fitness Efficiency (Goal: Top-Left)"), use_container_width=True)
+                st.plotly_chart(px.scatter(
+                    df_move, 
+                    x='Avg_HR', 
+                    y='Speed_Kmh', 
+                    color='Type', 
+                    size='Distance_Km', 
+                    hover_data=['Date', 'Notes'], 
+                    title="Fitness Efficiency (Goal: Top-Left)"
+                ), use_container_width=True)
+            else:
+                st.info("Log runs with Speed & HR to see efficiency.")
 
 with tab3:
     st.dataframe(load_data(), use_container_width=True)
