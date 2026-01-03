@@ -4,9 +4,10 @@ import plotly.express as px
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import date, datetime, timedelta
+import time
 
 # --- 1. CONFIG & GOOGLE SHEETS ---
-st.set_page_config(page_title="Cloud Fitness v21", layout="wide")
+st.set_page_config(page_title="Cloud Fitness v22", layout="wide")
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -36,7 +37,6 @@ def load_data():
                 df[col] = "" if col in ['Notes', 'Type', 'Sub_Category'] else 0.0
 
         # Type conversion & Cleaning
-        # IMPORTANT: Normalize to midnight to ensure stacking works perfectly
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.normalize()
         
         numeric_cols = [
@@ -89,12 +89,21 @@ def format_mmss(minutes):
 st.title("☁️ Cloud Fitness Tracker")
 tab1, tab2, tab3 = st.tabs(["📝 Log Workout", "📊 Dashboard", "💾 Data View"])
 
-# --- TAB 1: LOGGING ---
+# --- TAB 1: LOGGING (AUTO-RESET ENABLED) ---
 with tab1:
     st.header("Log Session")
+    
+    # Initialize a session key to handle the form reset
+    if 'form_id' not in st.session_state:
+        st.session_state.form_id = 0
+        
+    # We append form_id to every key so Streamlit thinks they are new widgets when we increment it
+    fid = st.session_state.form_id
+
     c1, c2 = st.columns(2)
-    with c1: date_input = st.date_input("Date", date.today())
-    with c2: activity_type = st.selectbox("Activity", ["Run/Walk Intervals", "Jogging", "Walking", "Cycling", "Strength", "Tennis", "Other"])
+    # Note: We usually keep Date as today even after reset, but let's reset to Default (Today)
+    with c1: date_input = st.date_input("Date", date.today(), key=f"date_{fid}")
+    with c2: activity_type = st.selectbox("Activity", ["Run/Walk Intervals", "Jogging", "Walking", "Cycling", "Strength", "Tennis", "Other"], key=f"type_{fid}")
 
     st.subheader("Session Details")
     c3, c4, c5 = st.columns(3)
@@ -104,39 +113,39 @@ with tab1:
     if activity_type == "Run/Walk Intervals":
         with c3:
             st.info("Interval Breakdown")
-            jog_str = st.text_input("Jogging Time", placeholder="MM:SS")
-            walk_str = st.text_input("Walking Time", placeholder="MM:SS")
+            jog_str = st.text_input("Jogging Time", placeholder="MM:SS", key=f"jog_{fid}")
+            walk_str = st.text_input("Walking Time", placeholder="MM:SS", key=f"walk_{fid}")
             jog_split = parse_time(jog_str)
             walk_split = parse_time(walk_str)
             duration = jog_split + walk_split
             st.write(f"**Total: {format_mmss(duration)}**")
         with c4: 
-            dist_str = st.text_input("Total Distance (km)", placeholder="5,2")
+            dist_str = st.text_input("Total Distance (km)", placeholder="5,2", key=f"dist_{fid}")
             distance = float(dist_str.replace(',', '.')) if dist_str else 0.0
             
     elif activity_type in ["Jogging", "Walking", "Cycling"]:
         with c3: 
-            dur_str = st.text_input("Total Duration", placeholder="MM:SS")
+            dur_str = st.text_input("Total Duration", placeholder="MM:SS", key=f"dur_{fid}")
             duration = parse_time(dur_str)
         with c4:
-            dist_str = st.text_input("Distance (km)", placeholder="5,2")
+            dist_str = st.text_input("Distance (km)", placeholder="5,2", key=f"dist_{fid}")
             distance = float(dist_str.replace(',', '.')) if dist_str else 0.0
             if activity_type == "Jogging": jog_split = duration
             if activity_type == "Walking": walk_split = duration
             
     elif activity_type == "Strength":
         with c3: 
-            dur_str = st.text_input("Total Duration", placeholder="MM:SS")
+            dur_str = st.text_input("Total Duration", placeholder="MM:SS", key=f"dur_{fid}")
             duration = parse_time(dur_str)
-        with c4: sub_category = st.radio("Focus", ["Upper", "Lower", "Full"], horizontal=True)
+        with c4: sub_category = st.radio("Focus", ["Upper", "Lower", "Full"], horizontal=True, key=f"sub_{fid}")
         
     elif activity_type in ["Tennis", "Other"]:
         with c3: 
-            dur_str = st.text_input("Total Duration", placeholder="MM:SS")
+            dur_str = st.text_input("Total Duration", placeholder="MM:SS", key=f"dur_{fid}")
             duration = parse_time(dur_str)
 
     with c5:
-        avg_hr = st.number_input("Avg HR", 0, step=1)
+        avg_hr = st.number_input("Avg HR", 0, step=1, key=f"hr_{fid}")
         if duration > 0 and distance > 0:
             speed_kmh = distance / (duration / 60)
             st.metric("Avg Speed", f"{speed_kmh:.1f} km/h")
@@ -144,11 +153,11 @@ with tab1:
     st.divider()
     st.subheader("Heart Rate Zones (MM:SS)")
     z_col1, z_col2, z_col3, z_col4, z_col5 = st.columns(5)
-    z1 = parse_time(z_col1.text_input("Zone 1 (Hafif)", placeholder="MM:SS"))
-    z2 = parse_time(z_col2.text_input("Zone 2 (Yoğun)", placeholder="MM:SS"))
-    z3 = parse_time(z_col3.text_input("Zone 3 (Aerobik)", placeholder="MM:SS"))
-    z4 = parse_time(z_col4.text_input("Zone 4 (Anaerobik)", placeholder="MM:SS"))
-    z5 = parse_time(z_col5.text_input("Zone 5 (VO2)", placeholder="MM:SS"))
+    z1 = parse_time(z_col1.text_input("Zone 1 (Hafif)", placeholder="MM:SS", key=f"z1_{fid}"))
+    z2 = parse_time(z_col2.text_input("Zone 2 (Yoğun)", placeholder="MM:SS", key=f"z2_{fid}"))
+    z3 = parse_time(z_col3.text_input("Zone 3 (Aerobik)", placeholder="MM:SS", key=f"z3_{fid}"))
+    z4 = parse_time(z_col4.text_input("Zone 4 (Anaerobik)", placeholder="MM:SS", key=f"z4_{fid}"))
+    z5 = parse_time(z_col5.text_input("Zone 5 (VO2)", placeholder="MM:SS", key=f"z5_{fid}"))
 
     total_zones = z1+z2+z3+z4+z5
     if total_zones > 0 and duration > 0:
@@ -160,7 +169,7 @@ with tab1:
         else:
              st.success("✅ Zones match perfectly")
 
-    notes = st.text_area("Notes")
+    notes = st.text_area("Notes", key=f"notes_{fid}")
 
     if st.button("Save to Cloud", type="primary"):
         save_workout({
@@ -169,7 +178,11 @@ with tab1:
             'Avg_HR': avg_hr, 'Jog_Split_Min': jog_split, 'Walk_Split_Min': walk_split,
             'Z1_Min': z1, 'Z2_Min': z2, 'Z3_Min': z3, 'Z4_Min': z4, 'Z5_Min': z5, 'Notes': notes
         })
-        st.success("Saved!")
+        st.success("Saved! Clearing form...")
+        # Increment form_id to effectively "reset" all widgets on next run
+        st.session_state.form_id += 1
+        time.sleep(1) # Short pause so user sees the Success message
+        st.rerun()
 
 # --- TAB 2: DASHBOARD ---
 with tab2:
@@ -220,16 +233,15 @@ with tab2:
                 z3_pct = (cardio_df['Z3_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
                 z4_pct = (cardio_df['Z4_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
                 z5_pct = (cardio_df['Z5_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
-                high_intensity_pct = ((cardio_df['Z4_Min'].sum() + cardio_df['Z5_Min'].sum()) / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
                 
                 prompt_text = f"""
-Act as an elite Performance Physiologist. Analyze the following training data for a 112 kg male athlete managing Metabolic Syndrome traits (High LDL, High CRP).
-Here is my training data for the period: {time_range}.
+Act as an elite Performance Physiologist. Analyze the following training data for a 112 kg male athlete managing Metabolic Syndrome traits.
+Period: {time_range}.
 
 **Summary:**
 - Total Duration: {int(total_time)} minutes
-- Number of Sessions: {len(df)}
-- Average Heart Rate: {int(avg_hr)} bpm
+- Sessions: {len(df)}
+- Avg HR: {int(avg_hr)} bpm
 
 **Intensity Distribution (Cardio):**
 - Zone 1: {z1_pct:.1f}%
@@ -241,8 +253,8 @@ Here is my training data for the period: {time_range}.
 **Specific Workouts:**
 {df[['Date', 'Type', 'Duration_Min', 'Distance_Km', 'Avg_HR']].to_string(index=False)}
 
-**My Goal:** I want to improve my cardio base, lose weight, maintain muscle, keep my borderline blood sugar and cholesterol levels in check.
-**Question:** Based on this data, am I following an efficient workout routine? Is there any thing I should change next week to improve efficiency?
+**Goal:** Improve cardio base, lose weight, maintain muscle, control glucose/lipids.
+**Question:** Analyze efficiency and suggest one change for next week.
 """
                 st.code(prompt_text, language="text")
 
@@ -269,7 +281,6 @@ Here is my training data for the period: {time_range}.
                     'Z4_Min': '#FF9500', 'Z5_Min': '#FF3B30'
                 }
                 
-                # CHART 1: Stacked Bar
                 with z_col1:
                     df_zones = df_cardio.melt(id_vars=['Date'], value_vars=['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'], var_name='Zone', value_name='Minutes')
                     df_zones = df_zones[df_zones['Minutes'] > 0]
@@ -279,11 +290,9 @@ Here is my training data for the period: {time_range}.
                         color_discrete_map=watch_colors,
                         title="Daily Cardio Load"
                     )
-                    # FIX: Back to 'date' type for nice spacing, with strict format
                     fig_bar.update_xaxes(type='date', tickformat="%b %d, %Y")
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                # CHART 2: Donut (FIXED LEGEND ORDER)
                 with z_col2:
                     sums = df_cardio[['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum()
                     strict_order = ['Zone 0 (Rest)', 'Zone 1 (Hafif)', 'Zone 2 (Yoğun)', 'Zone 3 (Aerobik)', 'Zone 4 (Anaerobik)', 'Zone 5 (VO2)']
@@ -326,7 +335,6 @@ Here is my training data for the period: {time_range}.
                     title="Jog vs Walk Ratio", 
                     color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}
                 )
-                # FIX: Strict Date Format
                 fig_int.update_xaxes(type='date', tickformat="%b %d, %Y")
                 st.plotly_chart(fig_int, use_container_width=True)
 
@@ -344,26 +352,41 @@ Here is my training data for the period: {time_range}.
                 else:
                     st.info("Log runs with Speed & HR to see chart.")
 
-            # --- 3. STRENGTH ---
+            # --- 3. STRENGTH (UPDATED TO PIE CHART) ---
             st.divider()
             st.subheader("🏋️ Strength Training Log")
             df_strength = df[ df['Type'] == 'Strength' ].copy()
             if df_strength.empty:
                 st.info("No Strength sessions logged yet.")
             else:
-                s_col1, s_col2 = st.columns([3, 1])
+                s_col1, s_col2 = st.columns([2, 1])
+                
                 with s_col1:
-                    fig_str = px.bar(
-                        df_strength, x='Date', y='Duration_Min', color='Sub_Category',
-                        title="Strength Consistency & Focus",
-                        labels={'Duration_Min': 'Duration (min)', 'Sub_Category': 'Focus Area'}
+                    # NEW: PIE CHART FOR STRENGTH
+                    # Group by Focus Area (Sub_Category) and sum Duration
+                    strength_pie = df_strength.groupby('Sub_Category')['Duration_Min'].sum().reset_index()
+                    strength_pie['Formatted'] = strength_pie['Duration_Min'].apply(format_mmss)
+                    
+                    fig_str = px.pie(
+                        strength_pie, 
+                        values='Duration_Min', 
+                        names='Sub_Category', 
+                        title="Focus Distribution (Time)",
+                        hole=0.4,
+                        # Simple colors for Upper/Lower/Full
+                        color_discrete_map={'Upper': '#636EFA', 'Lower': '#EF553B', 'Full': '#00CC96'} 
                     )
-                    # FIX: Use EXACT same logic as Cardio (Date axis)
-                    fig_str.update_xaxes(type='date', tickformat="%b %d, %Y")
+                    fig_str.update_traces(
+                        textinfo='percent+label',
+                        hovertemplate="<b>%{label}</b><br>Time: %{customdata[0]}",
+                        customdata=strength_pie[['Formatted']]
+                    )
                     st.plotly_chart(fig_str, use_container_width=True)
+                    
                 with s_col2:
+                    st.markdown("### Totals")
                     st.metric("Total Sessions", len(df_strength))
-                    st.metric("Total Time", format_mmss(df_strength['Duration_Min'].sum()))
+                    st.metric("Total Strength Time", format_mmss(df_strength['Duration_Min'].sum()))
 
 with tab3:
     st.markdown("### 💾 Raw Data (MM:SS)")
