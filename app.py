@@ -6,7 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import date, datetime, timedelta
 
 # --- 1. CONFIG & GOOGLE SHEETS ---
-st.set_page_config(page_title="Cloud Fitness v17", layout="wide")
+st.set_page_config(page_title="Cloud Fitness v19", layout="wide")
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -47,9 +47,8 @@ def load_data():
             df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
         
-        # --- NEW: Calculate Zone 0 (The missing time) ---
+        # Zone 0 Calculation
         zone_sum = df[['Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum(axis=1)
-        # Zone 0 is whatever is left over from Duration. Clip at 0 to avoid negative numbers.
         df['Z0_Min'] = (df['Duration_Min'] - zone_sum).clip(lower=0)
                 
         return df
@@ -150,11 +149,10 @@ with tab1:
     z4 = parse_time(z_col4.text_input("Zone 4 (Anaerobik)", placeholder="MM:SS"))
     z5 = parse_time(z_col5.text_input("Zone 5 (VO2)", placeholder="MM:SS"))
 
-    # Logic: If they enter zones, we trust them. Any missing time will be Z0 in the background.
     total_zones = z1+z2+z3+z4+z5
     if total_zones > 0 and duration > 0:
         diff = duration - total_zones
-        if diff < -0.1: # User entered MORE zone time than duration
+        if diff < -0.1:
              st.warning(f"⚠️ Zones sum ({format_mmss(total_zones)}) exceeds Duration ({format_mmss(duration)})")
         elif diff > 0.1:
              st.info(f"ℹ️ Remaining {format_mmss(diff)} will be tracked as 'Zone 0' (Rest).")
@@ -214,10 +212,9 @@ with tab2:
             m3.metric("Sessions", len(df))
             st.divider()
 
-            # --- 1. ZONE ANALYSIS (Cardio Only + Zone 0) ---
+            # --- 1. CARDIO ZONE ANALYSIS ---
             st.subheader("🎯 Cardio Zone Analysis")
             
-            # FILTER: Exclude Strength & Other
             df_cardio = df[ ~df['Type'].isin(['Strength', 'Other']) ].copy()
             
             if df_cardio.empty:
@@ -225,9 +222,8 @@ with tab2:
             else:
                 z_col1, z_col2 = st.columns([2, 1])
                 
-                # Colors including Zone 0 (Grey)
                 watch_colors = {
-                    'Z0_Min': '#D3D3D3', # Grey for Zone 0
+                    'Z0_Min': '#D3D3D3',
                     'Z1_Min': '#00BFFF', 'Z2_Min': '#00CC66', 'Z3_Min': '#FFCC00', 
                     'Z4_Min': '#FF9500', 'Z5_Min': '#FF3B30'
                 }
@@ -235,22 +231,26 @@ with tab2:
                 # CHART 1: Stacked Bar
                 with z_col1:
                     df_zones = df_cardio.melt(id_vars=['Date'], value_vars=['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'], var_name='Zone', value_name='Minutes')
-                    df_zones = df_zones[df_zones['Minutes'] > 0] # Clean up chart
+                    df_zones = df_zones[df_zones['Minutes'] > 0]
                     
                     fig_bar = px.bar(
                         df_zones, x='Date', y='Minutes', color='Zone', 
                         color_discrete_map=watch_colors,
-                        title="Daily Cardio Load (Grey = Zone 0/Rest)"
+                        title="Daily Cardio Load"
                     )
+                    # FIX: Strict Date Format (No 00:00:00)
+                    fig_bar.update_xaxes(tickformat="%b %d, %Y")
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                # CHART 2: Donut
+                # CHART 2: Donut (FIXED LEGEND ORDER)
                 with z_col2:
                     sums = df_cardio[['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum()
+                    strict_order = ['Zone 0 (Rest)', 'Zone 1 (Hafif)', 'Zone 2 (Yoğun)', 'Zone 3 (Aerobik)', 'Zone 4 (Anaerobik)', 'Zone 5 (VO2)']
+                    
                     pie_data = pd.DataFrame({
-                        'Zone': ['Zone 0 (Rest)', 'Zone 1 (Hafif)', 'Zone 2 (Yoğun)', 'Zone 3 (Aerobik)', 'Zone 4 (Anaerobik)', 'Zone 5 (VO2)'],
+                        'Zone': strict_order,
                         'Minutes': sums.values,
-                        'ColorKey': sums.index
+                        'ColorKey': ['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']
                     })
                     pie_data = pie_data[pie_data['Minutes'] > 0]
                     pie_data['Formatted'] = pie_data['Minutes'].apply(format_mmss)
@@ -258,12 +258,15 @@ with tab2:
                     fig_pie = px.pie(
                         pie_data, values='Minutes', names='Zone', color='ColorKey',
                         color_discrete_map=watch_colors, hole=0.4,
+                        category_orders={'Zone': strict_order},
                         title=f"Total: {format_mmss(df_cardio['Duration_Min'].sum())}"
                     )
+                    
                     fig_pie.update_traces(
                         textinfo='percent',
                         hovertemplate="<b>%{label}</b><br>Time: %{customdata[0]}<br>Ratio: %{percent}",
-                        customdata=pie_data[['Formatted']]
+                        customdata=pie_data[['Formatted']],
+                        sort=False 
                     )
                     fig_pie.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5))
                     st.plotly_chart(fig_pie, use_container_width=True)
@@ -276,7 +279,15 @@ with tab2:
                 st.subheader("Interval Evolution")
                 df_splits = df.melt(id_vars=['Date', 'Type'], value_vars=['Jog_Split_Min', 'Walk_Split_Min'], var_name='Split_Type', value_name='Minutes')
                 df_splits = df_splits[df_splits['Minutes'] > 0]
-                st.plotly_chart(px.bar(df_splits, x='Date', y='Minutes', color='Split_Type', title="Jog vs Walk Ratio", color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}), use_container_width=True)
+                
+                fig_int = px.bar(
+                    df_splits, x='Date', y='Minutes', color='Split_Type', 
+                    title="Jog vs Walk Ratio", 
+                    color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}
+                )
+                # FIX: Strict Date Format
+                fig_int.update_xaxes(tickformat="%b %d, %Y")
+                st.plotly_chart(fig_int, use_container_width=True)
 
             with c2:
                 st.subheader("Efficiency Analysis")
@@ -292,31 +303,24 @@ with tab2:
                 else:
                     st.info("Log runs with Speed & HR to see chart.")
 
-            # --- 3. STRENGTH TRACKER (New Section) ---
+            # --- 3. STRENGTH ---
             st.divider()
             st.subheader("🏋️ Strength Training Log")
-            
             df_strength = df[ df['Type'] == 'Strength' ].copy()
-            
             if df_strength.empty:
                 st.info("No Strength sessions logged yet.")
             else:
                 s_col1, s_col2 = st.columns([3, 1])
-                
                 with s_col1:
-                    # Bar Chart of Strength Duration by Focus
                     fig_str = px.bar(
-                        df_strength, 
-                        x='Date', 
-                        y='Duration_Min', 
-                        color='Sub_Category', # Colors by Upper/Lower/Full
+                        df_strength, x='Date', y='Duration_Min', color='Sub_Category',
                         title="Strength Consistency & Focus",
                         labels={'Duration_Min': 'Duration (min)', 'Sub_Category': 'Focus Area'}
                     )
+                    # FIX: Strict Date Format
+                    fig_str.update_xaxes(tickformat="%b %d, %Y")
                     st.plotly_chart(fig_str, use_container_width=True)
-                
                 with s_col2:
-                    # Simple count metric
                     st.metric("Total Sessions", len(df_strength))
                     st.metric("Total Time", format_mmss(df_strength['Duration_Min'].sum()))
 
