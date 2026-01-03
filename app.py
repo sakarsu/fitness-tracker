@@ -6,7 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import date, datetime, timedelta
 
 # --- 1. CONFIG & GOOGLE SHEETS ---
-st.set_page_config(page_title="Cloud Fitness v9", layout="wide")
+st.set_page_config(page_title="Cloud Fitness v11", layout="wide")
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -29,21 +29,14 @@ def load_data():
 def save_workout(entry):
     sheet = get_google_sheet()
     row = [
-        str(entry['Date']),
-        entry['Type'],
-        entry['Sub_Category'],
-        entry['Duration_Min'],
-        entry['Distance_Km'],
-        entry['Speed_Kmh'],
-        entry['Avg_HR'],
-        entry['Jog_Split_Min'],
-        entry['Walk_Split_Min'],
+        str(entry['Date']), entry['Type'], entry['Sub_Category'],
+        entry['Duration_Min'], entry['Distance_Km'], entry['Speed_Kmh'],
+        entry['Avg_HR'], entry['Jog_Split_Min'], entry['Walk_Split_Min'],
         entry['Z1_Min'], entry['Z2_Min'], entry['Z3_Min'], entry['Z4_Min'], entry['Z5_Min'],
         entry['Notes']
     ]
     sheet.append_row(row)
 
-# --- HELPER: Time Parser (MM:SS) ---
 def parse_time(input_str):
     if not input_str: return 0.0
     s = str(input_str).strip()
@@ -59,7 +52,7 @@ def parse_time(input_str):
 st.title("☁️ Cloud Fitness Tracker")
 tab1, tab2, tab3 = st.tabs(["📝 Log Workout", "📊 Dashboard", "💾 Data View"])
 
-# --- TAB 1: LOGGING (Unchanged) ---
+# --- TAB 1: LOGGING ---
 with tab1:
     st.header("Log Session")
     c1, c2 = st.columns(2)
@@ -99,7 +92,6 @@ with tab1:
 
     st.divider()
     st.subheader("Heart Rate Zones (MM:SS)")
-    
     z_col1, z_col2, z_col3, z_col4, z_col5 = st.columns(5)
     z1 = parse_time(z_col1.text_input("Zone 1 (Hafif)", placeholder="MM:SS"))
     z2 = parse_time(z_col2.text_input("Zone 2 (Yoğun)", placeholder="MM:SS"))
@@ -107,10 +99,9 @@ with tab1:
     z4 = parse_time(z_col4.text_input("Zone 4 (Anaerobik)", placeholder="MM:SS"))
     z5 = parse_time(z_col5.text_input("Zone 5 (VO2)", placeholder="MM:SS"))
 
-    total_zone_time = z1 + z2 + z3 + z4 + z5
-    if total_zone_time > 0 and duration > 0:
-        if abs(total_zone_time - duration) > 0.1:
-            st.warning(f"⚠️ Zone Sum ({total_zone_time:.2f}) ≠ Total Duration ({duration})")
+    if (z1+z2+z3+z4+z5) > 0 and duration > 0:
+        if abs((z1+z2+z3+z4+z5) - duration) > 0.1:
+            st.warning(f"⚠️ Sum ({z1+z2+z3+z4+z5:.2f}) ≠ Duration ({duration})")
         else:
             st.success("✅ Zones match")
 
@@ -125,34 +116,31 @@ with tab1:
         })
         st.success("Saved!")
 
-# --- TAB 2: DASHBOARD (New "Custom Range" Feature) ---
+# --- TAB 2: DASHBOARD (Complete) ---
 with tab2:
     if st.button("🔄 Refresh Data"): st.cache_data.clear()
     
     df_raw = load_data()
     
     if not df_raw.empty:
-        # --- FILTER SECTION ---
+        # FILTER
         st.markdown("### 📅 Time Filter")
         c_filter1, c_filter2 = st.columns([1, 2])
-        
         with c_filter1:
             time_range = st.radio("Select Period:", ["This Week", "This Month", "All Time", "Custom Range"])
             
         today = pd.Timestamp.now().normalize()
         start_date, end_date = None, None
         
-        # Logic to determine start/end dates
         if time_range == "This Week":
-            start_date = today - timedelta(days=today.weekday()) # Start of week (Mon)
+            start_date = today - timedelta(days=today.weekday())
             end_date = today
         elif time_range == "This Month":
             start_date = today.replace(day=1)
             end_date = today
         elif time_range == "Custom Range":
             with c_filter2:
-                # Default to last 30 days if nothing selected
-                custom_dates = st.date_input("Pick Start & End Date", [today - timedelta(days=30), today])
+                custom_dates = st.date_input("Pick Range", [today - timedelta(days=30), today])
                 if len(custom_dates) == 2:
                     start_date, end_date = pd.Timestamp(custom_dates[0]), pd.Timestamp(custom_dates[1])
 
@@ -160,44 +148,60 @@ with tab2:
         df = df_raw.copy()
         if time_range != "All Time" and start_date and end_date:
             df = df[ (df['Date'] >= start_date) & (df['Date'] <= end_date) ]
-            st.caption(f"Showing data from **{start_date.date()}** to **{end_date.date()}**")
 
-        # --- VISUALIZATION SECTION ---
         if df.empty:
-            st.warning(f"No workouts found for this period.")
+            st.warning("No data for this period.")
         else:
-            # Top Stats
+            # STATS
             m1, m2, m3 = st.columns(3)
-            m1.metric("Total Distance", f"{df['Distance_Km'].sum():.1f} km")
+            m1.metric("Total Dist", f"{df['Distance_Km'].sum():.1f} km")
             m2.metric("Total Duration", f"{int(df['Duration_Min'].sum())} min")
             m3.metric("Sessions", len(df))
-            
             st.divider()
+
+            # --- 1. CONSISTENCY CALENDAR (New!) ---
+            st.subheader("🗓️ Consistency Streak")
             
+            # Prepare data for punch card
+            df_cal = df.copy()
+            df_cal['DayOfWeek'] = df_cal['Date'].dt.day_name()
+            # Sort days: Monday at top (or bottom depending on preference, standard is Mon-Sun)
+            days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            df_cal['DayOfWeek'] = pd.Categorical(df_cal['DayOfWeek'], categories=days_order[::-1], ordered=True)
+            
+            fig_cal = px.scatter(
+                df_cal, 
+                x="Date", 
+                y="DayOfWeek", 
+                size="Duration_Min", 
+                color="Duration_Min",
+                color_continuous_scale="Greens",
+                title="Workout Heatmap (Darker = Longer)",
+                height=300
+            )
+            fig_cal.update_layout(xaxis_title=None, yaxis_title=None)
+            st.plotly_chart(fig_cal, use_container_width=True)
+
+            # --- 2. ZONES & INTERVALS ---
             c1, c2 = st.columns(2)
             with c1:
-                st.subheader("Activity Breakdown")
-                st.plotly_chart(px.pie(df, names='Type', hole=0.4), use_container_width=True)
+                st.subheader("Time in Zones")
+                df_zones = df.melt(id_vars=['Date'], value_vars=['Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'], var_name='Zone', value_name='Minutes')
+                watch_colors = {'Z1_Min':'#00BFFF', 'Z2_Min':'#00CC66', 'Z3_Min':'#FFCC00', 'Z4_Min':'#FF9500', 'Z5_Min':'#FF3B30'}
+                st.plotly_chart(px.bar(df_zones, x='Date', y='Minutes', color='Zone', color_discrete_map=watch_colors), use_container_width=True)
             
             with c2:
-                st.subheader("Zone Load (Watch Colors)")
-                zone_cols = ['Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']
-                df_zones = df.melt(id_vars=['Date'], value_vars=zone_cols, var_name='Zone', value_name='Minutes')
-                
-                # Colors matching your Watch
-                watch_colors = {
-                    'Z1_Min': '#00BFFF',  # Hafif (Blue)
-                    'Z2_Min': '#00CC66',  # Yogun (Green)
-                    'Z3_Min': '#FFCC00',  # Aerobik (Yellow/Gold)
-                    'Z4_Min': '#FF9500',  # Anaerobik (Orange)
-                    'Z5_Min': '#FF3B30'   # VO2 (Red)
-                }
-                
-                fig = px.bar(
-                    df_zones, x='Date', y='Minutes', color='Zone', 
-                    color_discrete_map=watch_colors, title="Time in Zones"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                st.subheader("Interval Evolution")
+                df_splits = df.melt(id_vars=['Date', 'Type'], value_vars=['Jog_Split_Min', 'Walk_Split_Min'], var_name='Split_Type', value_name='Minutes')
+                df_splits = df_splits[df_splits['Minutes'] > 0]
+                st.plotly_chart(px.bar(df_splits, x='Date', y='Minutes', color='Split_Type', title="Jog vs Walk Ratio", color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}), use_container_width=True)
+
+            # --- 3. EFFICIENCY ---
+            st.divider()
+            st.subheader("Efficiency Analysis")
+            df_move = df[ (df['Speed_Kmh'] > 0) & (df['Avg_HR'] > 0) ]
+            if not df_move.empty:
+                st.plotly_chart(px.scatter(df_move, x='Avg_HR', y='Speed_Kmh', color='Type', size='Distance_Km', hover_data=['Date', 'Notes'], title="Fitness Efficiency (Goal: Top-Left)"), use_container_width=True)
 
 with tab3:
     st.dataframe(load_data(), use_container_width=True)
