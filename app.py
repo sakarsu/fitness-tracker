@@ -217,6 +217,9 @@ with tab2:
                 cardio_df = df[~df['Type'].isin(['Strength', 'Other'])]
                 z1_pct = (cardio_df['Z1_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
                 z2_pct = (cardio_df['Z2_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
+                z3_pct = (cardio_df['Z3_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
+                z4_pct = (cardio_df['Z4_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
+                z5_pct = (cardio_df['Z5_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
                 high_intensity_pct = ((cardio_df['Z4_Min'].sum() + cardio_df['Z5_Min'].sum()) / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
                 
                 prompt_text = f"""
