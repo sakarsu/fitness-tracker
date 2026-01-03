@@ -6,7 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import date, datetime, timedelta
 
 # --- 1. CONFIG & GOOGLE SHEETS ---
-st.set_page_config(page_title="Cloud Fitness v12", layout="wide")
+st.set_page_config(page_title="Cloud Fitness v14", layout="wide")
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -22,20 +22,24 @@ def load_data():
         df = pd.DataFrame(data)
         
         if not df.empty:
-            # FIX 1: Force Date Conversion
+            # 1. Force Date Conversion
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
             
-            # FIX 2: Force Numeric Conversion (Prevents Crash)
-            # Google Sheets sometimes sends numbers as strings. We must fix this.
+            # 2. THE COMMA FIXER (Critical for your locale)
+            # We convert all numeric columns, handling '1,27' as '1.27'
             numeric_cols = [
                 'Duration_Min', 'Distance_Km', 'Speed_Kmh', 'Avg_HR', 
                 'Jog_Split_Min', 'Walk_Split_Min', 
                 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'
             ]
             for col in numeric_cols:
-                # 'coerce' turns bad text into NaN, then we fill with 0
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                
+                if col in df.columns:
+                    # Convert column to string -> replace comma with dot -> convert to float
+                    df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+                else:
+                    df[col] = 0.0 
+                    
         return df
     except Exception:
         return pd.DataFrame()
@@ -51,9 +55,10 @@ def save_workout(entry):
     ]
     sheet.append_row(row)
 
+# --- HELPER: Universal Time Parser (MM:SS -> Decimal Minutes) ---
 def parse_time(input_str):
     if not input_str: return 0.0
-    s = str(input_str).strip()
+    s = str(input_str).strip().replace(',', '.') # Handle 1,5 as 1.5 here too
     try:
         if ':' in s:
             parts = s.split(':')
@@ -61,6 +66,13 @@ def parse_time(input_str):
         return float(s)
     except ValueError:
         return 0.0
+
+# --- HELPER: Display Formatter (Decimal Minutes -> MM:SS) ---
+def format_mmss(minutes):
+    if minutes == 0: return "00:00"
+    mins = int(minutes)
+    secs = int((minutes - mins) * 60)
+    return f"{mins}:{secs:02d}"
 
 # --- 2. INTERFACE ---
 st.title("☁️ Cloud Fitness Tracker")
@@ -78,25 +90,44 @@ with tab1:
     duration, jog_split, walk_split, distance, speed_kmh = 0, 0, 0, 0.0, 0.0
     sub_category = "N/A"
 
+    # --- CHANGED: ALL DURATION INPUTS ARE NOW TEXT (MM:SS) ---
     if activity_type == "Run/Walk Intervals":
         with c3:
             st.info("Interval Breakdown")
-            jog_split = st.number_input("Jogging (min)", 0, step=1)
-            walk_split = st.number_input("Walking (min)", 0, step=1)
+            jog_str = st.text_input("Jogging Time", placeholder="MM:SS")
+            walk_str = st.text_input("Walking Time", placeholder="MM:SS")
+            
+            jog_split = parse_time(jog_str)
+            walk_split = parse_time(walk_str)
             duration = jog_split + walk_split
-            st.write(f"**Total: {duration} min**")
-        with c4: distance = st.number_input("Total Distance (km)", 0.0, step=0.1)
+            
+            st.write(f"**Total: {format_mmss(duration)}**")
+        with c4: 
+            # DISTANCE IS NUMBER, BUT WE HANDLE COMMAS
+            dist_str = st.text_input("Total Distance (km)", placeholder="5,2")
+            distance = float(dist_str.replace(',', '.')) if dist_str else 0.0
+            
     elif activity_type in ["Jogging", "Walking", "Cycling"]:
-        with c3: duration = st.number_input("Total Duration (min)", 1, step=1)
+        with c3: 
+            dur_str = st.text_input("Total Duration", placeholder="MM:SS")
+            duration = parse_time(dur_str)
         with c4:
-            distance = st.number_input("Distance (km)", 0.0, step=0.1)
+            dist_str = st.text_input("Distance (km)", placeholder="5,2")
+            distance = float(dist_str.replace(',', '.')) if dist_str else 0.0
+            
             if activity_type == "Jogging": jog_split = duration
             if activity_type == "Walking": walk_split = duration
+            
     elif activity_type == "Strength":
-        with c3: duration = st.number_input("Total Duration (min)", 1, step=1)
+        with c3: 
+            dur_str = st.text_input("Total Duration", placeholder="MM:SS")
+            duration = parse_time(dur_str)
         with c4: sub_category = st.radio("Focus", ["Upper", "Lower", "Full"], horizontal=True)
+        
     elif activity_type in ["Tennis", "Other"]:
-        with c3: duration = st.number_input("Total Duration (min)", 1, step=1)
+        with c3: 
+            dur_str = st.text_input("Total Duration", placeholder="MM:SS")
+            duration = parse_time(dur_str)
 
     with c5:
         avg_hr = st.number_input("Avg HR", 0, step=1)
@@ -113,9 +144,10 @@ with tab1:
     z4 = parse_time(z_col4.text_input("Zone 4 (Anaerobik)", placeholder="MM:SS"))
     z5 = parse_time(z_col5.text_input("Zone 5 (VO2)", placeholder="MM:SS"))
 
-    if (z1+z2+z3+z4+z5) > 0 and duration > 0:
-        if abs((z1+z2+z3+z4+z5) - duration) > 0.1:
-            st.warning(f"⚠️ Sum ({z1+z2+z3+z4+z5:.2f}) ≠ Duration ({duration})")
+    total_zones = z1+z2+z3+z4+z5
+    if total_zones > 0 and duration > 0:
+        if abs(total_zones - duration) > 0.1:
+            st.warning(f"⚠️ Sum ({format_mmss(total_zones)}) ≠ Duration ({format_mmss(duration)})")
         else:
             st.success("✅ Zones match")
 
@@ -166,35 +198,31 @@ with tab2:
         if df.empty:
             st.warning("No data for this period.")
         else:
-            # STATS
+            # Stats
             m1, m2, m3 = st.columns(3)
             m1.metric("Total Dist", f"{df['Distance_Km'].sum():.1f} km")
-            m2.metric("Total Duration", f"{int(df['Duration_Min'].sum())} min")
+            m2.metric("Total Duration", f"{format_mmss(df['Duration_Min'].sum())}")
             m3.metric("Sessions", len(df))
             st.divider()
 
-            # --- 1. CONSISTENCY CALENDAR ---
-            st.subheader("🗓️ Consistency Streak")
+            # --- 1. CALENDAR VIEW ---
+            st.subheader("🗓️ Calendar Heatmap")
+            cal_df = df.copy()
+            cal_df['Week'] = cal_df['Date'].dt.isocalendar().week
+            cal_df['Day'] = cal_df['Date'].dt.day_name()
+            days_order = ['Sunday', 'Saturday', 'Friday', 'Thursday', 'Wednesday', 'Tuesday', 'Monday']
             
-            df_cal = df.copy()
-            df_cal['DayOfWeek'] = df_cal['Date'].dt.day_name()
-            days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-            df_cal['DayOfWeek'] = pd.Categorical(df_cal['DayOfWeek'], categories=days_order[::-1], ordered=True)
-            
-            # Use discrete map for Heatmap
             fig_cal = px.scatter(
-                df_cal, 
-                x="Date", 
-                y="DayOfWeek", 
-                size="Duration_Min", 
-                color="Duration_Min",
+                cal_df,
+                x="Date", y="Day", color="Duration_Min",
                 color_continuous_scale="Greens",
-                title="Workout Heatmap",
-                height=300
+                hover_data=['Type', 'Duration_Min'],
+                symbol_sequence=['square'], 
+                title="Activity Log (Green Intensity = Duration)"
             )
-            # FIX FOR X-AXIS: Ensure it treats X as Date
-            fig_cal.update_xaxes(type='date', tickformat="%b %d")
-            fig_cal.update_layout(xaxis_title=None, yaxis_title=None)
+            fig_cal.update_traces(marker=dict(size=20, opacity=1, line=dict(width=1, color='DarkSlateGrey')))
+            fig_cal.update_yaxes(categoryorder='array', categoryarray=days_order)
+            fig_cal.update_layout(height=250, xaxis_title="", yaxis_title="")
             st.plotly_chart(fig_cal, use_container_width=True)
 
             # --- 2. ZONES & INTERVALS ---
@@ -211,25 +239,33 @@ with tab2:
                 df_splits = df_splits[df_splits['Minutes'] > 0]
                 st.plotly_chart(px.bar(df_splits, x='Date', y='Minutes', color='Split_Type', title="Jog vs Walk Ratio", color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}), use_container_width=True)
 
-            # --- 3. EFFICIENCY (CRASH FIXED) ---
+            # --- 3. EFFICIENCY (SAFE FROM CRASHES) ---
             st.divider()
             st.subheader("Efficiency Analysis")
             
-            # Ensure filtering works on numeric data
-            df_move = df[ (df['Speed_Kmh'] > 0) & (df['Avg_HR'] > 0) ]
+            # Safe Filtering
+            df_move = df[ (df['Speed_Kmh'] > 0) & (df['Avg_HR'] > 0) ].copy()
             
             if not df_move.empty:
+                # Ensure distance is clean for bubble size
+                df_move['Distance_Km'] = df_move['Distance_Km'].clip(lower=0.5) 
+
                 st.plotly_chart(px.scatter(
-                    df_move, 
-                    x='Avg_HR', 
-                    y='Speed_Kmh', 
-                    color='Type', 
-                    size='Distance_Km', 
-                    hover_data=['Date', 'Notes'], 
+                    df_move, x='Avg_HR', y='Speed_Kmh', color='Type', 
+                    size='Distance_Km', hover_data=['Date', 'Notes'], 
                     title="Fitness Efficiency (Goal: Top-Left)"
                 ), use_container_width=True)
             else:
-                st.info("Log runs with Speed & HR to see efficiency.")
+                st.info("Log runs with Speed & HR to see the efficiency chart.")
 
 with tab3:
-    st.dataframe(load_data(), use_container_width=True)
+    st.markdown("### 💾 Raw Data (MM:SS Formatted)")
+    # Create a display copy to show MM:SS without breaking the math
+    df_display = load_data().copy()
+    if not df_display.empty:
+        time_cols = ['Duration_Min', 'Jog_Split_Min', 'Walk_Split_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']
+        for col in time_cols:
+            if col in df_display.columns:
+                df_display[col] = df_display[col].apply(format_mmss)
+    
+    st.dataframe(df_display, use_container_width=True)
