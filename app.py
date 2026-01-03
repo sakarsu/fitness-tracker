@@ -6,7 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import date, datetime, timedelta
 
 # --- 1. CONFIG & GOOGLE SHEETS ---
-st.set_page_config(page_title="Cloud Fitness v20", layout="wide")
+st.set_page_config(page_title="Cloud Fitness v21", layout="wide")
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -36,7 +36,8 @@ def load_data():
                 df[col] = "" if col in ['Notes', 'Type', 'Sub_Category'] else 0.0
 
         # Type conversion & Cleaning
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        # IMPORTANT: Normalize to midnight to ensure stacking works perfectly
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.normalize()
         
         numeric_cols = [
             'Duration_Min', 'Distance_Km', 'Speed_Kmh', 'Avg_HR', 
@@ -205,40 +206,40 @@ with tab2:
         if df.empty:
             st.warning("No data for this period.")
         else:
-            # --- AI PROMPT GENERATOR (NEW) ---
+            # --- AI PROMPT GENERATOR ---
             with st.expander("🤖 Generate AI Coach Prompt (Click to Expand)", expanded=False):
                 st.caption("Copy this text and paste it into ChatGPT/Gemini/Claude for instant analysis.")
                 
-                # Calculate summary stats for the prompt
                 total_dist = df['Distance_Km'].sum()
                 total_time = df['Duration_Min'].sum()
                 avg_hr = df[df['Avg_HR'] > 0]['Avg_HR'].mean() if not df[df['Avg_HR'] > 0].empty else 0
                 
-                # Zone breakdown for prompt
                 cardio_df = df[~df['Type'].isin(['Strength', 'Other'])]
                 z1_pct = (cardio_df['Z1_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
                 z2_pct = (cardio_df['Z2_Min'].sum() / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
                 high_intensity_pct = ((cardio_df['Z4_Min'].sum() + cardio_df['Z5_Min'].sum()) / cardio_df['Duration_Min'].sum() * 100) if not cardio_df.empty and cardio_df['Duration_Min'].sum() > 0 else 0
                 
                 prompt_text = f"""
-I need you to act as an elite running and fitness coach. Here is my training data for the period: {time_range}.
+Act as an elite Performance Physiologist. Analyze the following training data for a 112 kg male athlete managing Metabolic Syndrome traits (High LDL, High CRP).
+Here is my training data for the period: {time_range}.
 
 **Summary:**
-- Total Distance: {total_dist:.1f} km
 - Total Duration: {int(total_time)} minutes
 - Number of Sessions: {len(df)}
 - Average Heart Rate: {int(avg_hr)} bpm
 
 **Intensity Distribution (Cardio):**
-- Zone 1 (Recovery): {z1_pct:.1f}%
-- Zone 2 (Endurance): {z2_pct:.1f}%
-- High Intensity (Zone 4+5): {high_intensity_pct:.1f}%
+- Zone 1: {z1_pct:.1f}%
+- Zone 2: {z2_pct:.1f}%
+- Zone 3: {z3_pct:.1f}%
+- Zone 4: {z4_pct:.1f}%
+- Zone 5: {z5_pct:.1f}%
 
 **Specific Workouts:**
 {df[['Date', 'Type', 'Duration_Min', 'Distance_Km', 'Avg_HR']].to_string(index=False)}
 
-**My Goal:** I want to improve my cardio base while maintaining muscle.
-**Question:** Based on this data, am I following the 80/20 rule correctly? What is the one thing I should change next week to improve efficiency?
+**My Goal:** I want to improve my cardio base, lose weight, maintain muscle, keep my borderline blood sugar and cholesterol levels in check.
+**Question:** Based on this data, am I following an efficient workout routine? Is there any thing I should change next week to improve efficiency?
 """
                 st.code(prompt_text, language="text")
 
@@ -275,11 +276,11 @@ I need you to act as an elite running and fitness coach. Here is my training dat
                         color_discrete_map=watch_colors,
                         title="Daily Cardio Load"
                     )
-                    # FIX: Strict Date Format & Categorical Axis (Prevents empty gaps)
-                    fig_bar.update_xaxes(tickformat="%b %d, %Y", type='category')
+                    # FIX: Back to 'date' type for nice spacing, with strict format
+                    fig_bar.update_xaxes(type='date', tickformat="%b %d, %Y")
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                # CHART 2: Donut
+                # CHART 2: Donut (FIXED LEGEND ORDER)
                 with z_col2:
                     sums = df_cardio[['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum()
                     strict_order = ['Zone 0 (Rest)', 'Zone 1 (Hafif)', 'Zone 2 (Yoğun)', 'Zone 3 (Aerobik)', 'Zone 4 (Anaerobik)', 'Zone 5 (VO2)']
@@ -323,7 +324,7 @@ I need you to act as an elite running and fitness coach. Here is my training dat
                     color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}
                 )
                 # FIX: Strict Date Format
-                fig_int.update_xaxes(tickformat="%b %d, %Y", type='category')
+                fig_int.update_xaxes(type='date', tickformat="%b %d, %Y")
                 st.plotly_chart(fig_int, use_container_width=True)
 
             with c2:
@@ -354,8 +355,8 @@ I need you to act as an elite running and fitness coach. Here is my training dat
                         title="Strength Consistency & Focus",
                         labels={'Duration_Min': 'Duration (min)', 'Sub_Category': 'Focus Area'}
                     )
-                    # FIX: Force X-axis to be CATEGORICAL (Discrete bars, no timeline)
-                    fig_str.update_xaxes(type='category', tickformat="%b %d, %Y")
+                    # FIX: Use EXACT same logic as Cardio (Date axis)
+                    fig_str.update_xaxes(type='date', tickformat="%b %d, %Y")
                     st.plotly_chart(fig_str, use_container_width=True)
                 with s_col2:
                     st.metric("Total Sessions", len(df_strength))
