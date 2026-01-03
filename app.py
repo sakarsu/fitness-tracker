@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import date, datetime, timedelta
 
 # --- 1. CONFIG & GOOGLE SHEETS ---
-st.set_page_config(page_title="Cloud Fitness v15", layout="wide")
+st.set_page_config(page_title="Cloud Fitness v16", layout="wide")
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -21,8 +22,7 @@ def load_data():
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
         
-        # --- SELF-HEALING: Ensure all columns exist ---
-        # This prevents crashes if you delete a column in Sheets
+        # Self-Healing: Ensure columns exist
         expected_cols = [
             'Date', 'Type', 'Sub_Category', 'Duration_Min', 'Distance_Km', 
             'Speed_Kmh', 'Avg_HR', 'Jog_Split_Min', 'Walk_Split_Min', 
@@ -36,17 +36,16 @@ def load_data():
             if col not in df.columns:
                 df[col] = "" if col in ['Notes', 'Type', 'Sub_Category'] else 0.0
 
-        # 1. Force Date Conversion
+        # Date & Number conversion
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         
-        # 2. THE COMMA FIXER (Handles "1,27" -> 1.27)
         numeric_cols = [
             'Duration_Min', 'Distance_Km', 'Speed_Kmh', 'Avg_HR', 
             'Jog_Split_Min', 'Walk_Split_Min', 
             'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'
         ]
         for col in numeric_cols:
-            # Clean string numbers and convert
+            # Comma Fixer: 1,27 -> 1.27
             df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
                 
@@ -65,7 +64,7 @@ def save_workout(entry):
     ]
     sheet.append_row(row)
 
-# --- HELPER: Universal Time Parser (MM:SS -> Decimal Minutes) ---
+# --- HELPERS ---
 def parse_time(input_str):
     if not input_str: return 0.0
     s = str(input_str).strip().replace(',', '.') 
@@ -77,7 +76,6 @@ def parse_time(input_str):
     except ValueError:
         return 0.0
 
-# --- HELPER: Display Formatter (Decimal Minutes -> MM:SS) ---
 def format_mmss(minutes):
     if minutes == 0: return "00:00"
     mins = int(minutes)
@@ -100,7 +98,6 @@ with tab1:
     duration, jog_split, walk_split, distance, speed_kmh = 0, 0, 0, 0.0, 0.0
     sub_category = "N/A"
 
-    # DURATION INPUTS (MM:SS TEXT)
     if activity_type == "Run/Walk Intervals":
         with c3:
             st.info("Interval Breakdown")
@@ -196,7 +193,6 @@ with tab2:
                 if len(custom_dates) == 2:
                     start_date, end_date = pd.Timestamp(custom_dates[0]), pd.Timestamp(custom_dates[1])
 
-        # Apply Filter
         df = df_raw.copy()
         if time_range != "All Time" and start_date and end_date:
             df = df[ (df['Date'] >= start_date) & (df['Date'] <= end_date) ]
@@ -211,70 +207,94 @@ with tab2:
             m3.metric("Sessions", len(df))
             st.divider()
 
-            # --- 1. CALENDAR VIEW ---
-            st.subheader("🗓️ Calendar Heatmap")
-            cal_df = df.copy()
-            # Sort by Date so the calendar order is correct
-            cal_df = cal_df.sort_values('Date')
+            # --- 1. ZONE ANALYSIS (Replacing Calendar) ---
+            st.subheader("🎯 Zone Analysis")
+            z_col1, z_col2 = st.columns([2, 1])
             
-            cal_df['Week'] = cal_df['Date'].dt.isocalendar().week
-            cal_df['Day'] = cal_df['Date'].dt.day_name()
-            days_order = ['Sunday', 'Saturday', 'Friday', 'Thursday', 'Wednesday', 'Tuesday', 'Monday']
-            
-            fig_cal = px.scatter(
-                cal_df,
-                x="Date", y="Day", color="Duration_Min",
-                color_continuous_scale="Greens",
-                hover_data=['Type', 'Duration_Min'],
-                symbol_sequence=['square'], 
-                title="Activity Log"
-            )
-            fig_cal.update_traces(marker=dict(size=20, opacity=1, line=dict(width=1, color='DarkSlateGrey')))
-            fig_cal.update_yaxes(categoryorder='array', categoryarray=days_order)
-            fig_cal.update_layout(height=250, xaxis_title="", yaxis_title="")
-            st.plotly_chart(fig_cal, width=1000) # Fixed the width warning
-
-            # --- 2. ZONES & INTERVALS ---
-            c1, c2 = st.columns(2)
-            with c1:
-                st.subheader("Time in Zones")
+            # CHART 1: Daily Stacked Bar (When did I do it?)
+            with z_col1:
                 df_zones = df.melt(id_vars=['Date'], value_vars=['Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'], var_name='Zone', value_name='Minutes')
                 watch_colors = {'Z1_Min':'#00BFFF', 'Z2_Min':'#00CC66', 'Z3_Min':'#FFCC00', 'Z4_Min':'#FF9500', 'Z5_Min':'#FF3B30'}
-                st.plotly_chart(px.bar(df_zones, x='Date', y='Minutes', color='Zone', color_discrete_map=watch_colors), width=600)
-            
-            with c2:
+                
+                fig_bar = px.bar(
+                    df_zones, x='Date', y='Minutes', color='Zone', 
+                    color_discrete_map=watch_colors,
+                    title="Daily Zone Load"
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+
+            # CHART 2: Summary Donut (What are the totals?)
+            with z_col2:
+                # Calculate sums for the Donut
+                total_z1 = df['Z1_Min'].sum()
+                total_z2 = df['Z2_Min'].sum()
+                total_z3 = df['Z3_Min'].sum()
+                total_z4 = df['Z4_Min'].sum()
+                total_z5 = df['Z5_Min'].sum()
+                
+                # Create mini DataFrame for Plotly
+                pie_data = pd.DataFrame({
+                    'Zone': ['Zone 1 (Hafif)', 'Zone 2 (Yoğun)', 'Zone 3 (Aerobik)', 'Zone 4 (Anaerobik)', 'Zone 5 (VO2)'],
+                    'Minutes': [total_z1, total_z2, total_z3, total_z4, total_z5],
+                    'ColorKey': ['Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']
+                })
+                # Filter out zeroes to keep chart clean
+                pie_data = pie_data[pie_data['Minutes'] > 0]
+                
+                # Add formatted time for hover
+                pie_data['Formatted'] = pie_data['Minutes'].apply(format_mmss)
+                
+                fig_pie = px.pie(
+                    pie_data, 
+                    values='Minutes', 
+                    names='Zone',
+                    color='ColorKey',
+                    color_discrete_map=watch_colors,
+                    hole=0.4, # Makes it a Donut
+                    title=f"Total: {format_mmss(df['Duration_Min'].sum())}"
+                )
+                
+                # CUSTOM HOVER & TEXT: Shows "12:30 (55%)"
+                fig_pie.update_traces(
+                    textinfo='percent',
+                    hovertemplate="<b>%{label}</b><br>Time: %{customdata[0]}<br>Ratio: %{percent}",
+                    customdata=pie_data[['Formatted']]
+                )
+                # Move legend to bottom to save width
+                fig_pie.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5))
+                
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            st.divider()
+
+            # --- 2. INTERVALS & EFFICIENCY ---
+            c1, c2 = st.columns(2)
+            with c1:
                 st.subheader("Interval Evolution")
                 df_splits = df.melt(id_vars=['Date', 'Type'], value_vars=['Jog_Split_Min', 'Walk_Split_Min'], var_name='Split_Type', value_name='Minutes')
                 df_splits = df_splits[df_splits['Minutes'] > 0]
-                st.plotly_chart(px.bar(df_splits, x='Date', y='Minutes', color='Split_Type', title="Jog vs Walk Ratio", color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}), width=600)
+                st.plotly_chart(px.bar(df_splits, x='Date', y='Minutes', color='Split_Type', title="Jog vs Walk Ratio", color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}), use_container_width=True)
 
-            # --- 3. EFFICIENCY (CRASH FIXED) ---
-            st.divider()
-            st.subheader("Efficiency Analysis")
-            
-            df_move = df[ (df['Speed_Kmh'] > 0) & (df['Avg_HR'] > 0) ].copy()
-            
-            if not df_move.empty:
-                # Clip distance to ensure bubble size is never 0
-                df_move['Distance_Km'] = df_move['Distance_Km'].clip(lower=0.5)
-
-                st.plotly_chart(px.scatter(
-                    df_move, x='Avg_HR', y='Speed_Kmh', color='Type', 
-                    size='Distance_Km', 
-                    # Only show Notes if the column actually exists (Self-Healing logic handles this, but double check)
-                    hover_data=['Date', 'Notes'] if 'Notes' in df_move.columns else ['Date'], 
-                    title="Fitness Efficiency (Goal: Top-Left)"
-                ), width=1000)
-            else:
-                st.info("Log runs with Speed & HR to see the efficiency chart.")
+            with c2:
+                st.subheader("Efficiency Analysis")
+                df_move = df[ (df['Speed_Kmh'] > 0) & (df['Avg_HR'] > 0) ].copy()
+                if not df_move.empty:
+                    df_move['Distance_Km'] = df_move['Distance_Km'].clip(lower=0.5)
+                    st.plotly_chart(px.scatter(
+                        df_move, x='Avg_HR', y='Speed_Kmh', color='Type', 
+                        size='Distance_Km', 
+                        hover_data=['Date', 'Notes'] if 'Notes' in df_move.columns else ['Date'], 
+                        title="Efficiency (Goal: Top-Left)"
+                    ), use_container_width=True)
+                else:
+                    st.info("Log runs with Speed & HR to see chart.")
 
 with tab3:
-    st.markdown("### 💾 Raw Data (MM:SS Formatted)")
+    st.markdown("### 💾 Raw Data (MM:SS)")
     df_display = load_data().copy()
     if not df_display.empty:
         time_cols = ['Duration_Min', 'Jog_Split_Min', 'Walk_Split_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']
         for col in time_cols:
             if col in df_display.columns:
                 df_display[col] = df_display[col].apply(format_mmss)
-    
-    st.dataframe(df_display, width=1500)
+    st.dataframe(df_display, use_container_width=True)
