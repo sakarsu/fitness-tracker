@@ -6,7 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import date, datetime, timedelta
 
 # --- 1. CONFIG & GOOGLE SHEETS ---
-st.set_page_config(page_title="Cloud Fitness v14", layout="wide")
+st.set_page_config(page_title="Cloud Fitness v15", layout="wide")
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -21,25 +21,35 @@ def load_data():
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
         
-        if not df.empty:
-            # 1. Force Date Conversion
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            
-            # 2. THE COMMA FIXER (Critical for your locale)
-            # We convert all numeric columns, handling '1,27' as '1.27'
-            numeric_cols = [
-                'Duration_Min', 'Distance_Km', 'Speed_Kmh', 'Avg_HR', 
-                'Jog_Split_Min', 'Walk_Split_Min', 
-                'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'
-            ]
-            for col in numeric_cols:
-                if col in df.columns:
-                    # Convert column to string -> replace comma with dot -> convert to float
-                    df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-                else:
-                    df[col] = 0.0 
-                    
+        # --- SELF-HEALING: Ensure all columns exist ---
+        # This prevents crashes if you delete a column in Sheets
+        expected_cols = [
+            'Date', 'Type', 'Sub_Category', 'Duration_Min', 'Distance_Km', 
+            'Speed_Kmh', 'Avg_HR', 'Jog_Split_Min', 'Walk_Split_Min', 
+            'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min', 'Notes'
+        ]
+        
+        if df.empty:
+            return pd.DataFrame(columns=expected_cols)
+
+        for col in expected_cols:
+            if col not in df.columns:
+                df[col] = "" if col in ['Notes', 'Type', 'Sub_Category'] else 0.0
+
+        # 1. Force Date Conversion
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        
+        # 2. THE COMMA FIXER (Handles "1,27" -> 1.27)
+        numeric_cols = [
+            'Duration_Min', 'Distance_Km', 'Speed_Kmh', 'Avg_HR', 
+            'Jog_Split_Min', 'Walk_Split_Min', 
+            'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'
+        ]
+        for col in numeric_cols:
+            # Clean string numbers and convert
+            df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+                
         return df
     except Exception:
         return pd.DataFrame()
@@ -58,7 +68,7 @@ def save_workout(entry):
 # --- HELPER: Universal Time Parser (MM:SS -> Decimal Minutes) ---
 def parse_time(input_str):
     if not input_str: return 0.0
-    s = str(input_str).strip().replace(',', '.') # Handle 1,5 as 1.5 here too
+    s = str(input_str).strip().replace(',', '.') 
     try:
         if ':' in s:
             parts = s.split(':')
@@ -90,20 +100,17 @@ with tab1:
     duration, jog_split, walk_split, distance, speed_kmh = 0, 0, 0, 0.0, 0.0
     sub_category = "N/A"
 
-    # --- CHANGED: ALL DURATION INPUTS ARE NOW TEXT (MM:SS) ---
+    # DURATION INPUTS (MM:SS TEXT)
     if activity_type == "Run/Walk Intervals":
         with c3:
             st.info("Interval Breakdown")
             jog_str = st.text_input("Jogging Time", placeholder="MM:SS")
             walk_str = st.text_input("Walking Time", placeholder="MM:SS")
-            
             jog_split = parse_time(jog_str)
             walk_split = parse_time(walk_str)
             duration = jog_split + walk_split
-            
             st.write(f"**Total: {format_mmss(duration)}**")
         with c4: 
-            # DISTANCE IS NUMBER, BUT WE HANDLE COMMAS
             dist_str = st.text_input("Total Distance (km)", placeholder="5,2")
             distance = float(dist_str.replace(',', '.')) if dist_str else 0.0
             
@@ -114,7 +121,6 @@ with tab1:
         with c4:
             dist_str = st.text_input("Distance (km)", placeholder="5,2")
             distance = float(dist_str.replace(',', '.')) if dist_str else 0.0
-            
             if activity_type == "Jogging": jog_split = duration
             if activity_type == "Walking": walk_split = duration
             
@@ -208,6 +214,9 @@ with tab2:
             # --- 1. CALENDAR VIEW ---
             st.subheader("🗓️ Calendar Heatmap")
             cal_df = df.copy()
+            # Sort by Date so the calendar order is correct
+            cal_df = cal_df.sort_values('Date')
+            
             cal_df['Week'] = cal_df['Date'].dt.isocalendar().week
             cal_df['Day'] = cal_df['Date'].dt.day_name()
             days_order = ['Sunday', 'Saturday', 'Friday', 'Thursday', 'Wednesday', 'Tuesday', 'Monday']
@@ -218,12 +227,12 @@ with tab2:
                 color_continuous_scale="Greens",
                 hover_data=['Type', 'Duration_Min'],
                 symbol_sequence=['square'], 
-                title="Activity Log (Green Intensity = Duration)"
+                title="Activity Log"
             )
             fig_cal.update_traces(marker=dict(size=20, opacity=1, line=dict(width=1, color='DarkSlateGrey')))
             fig_cal.update_yaxes(categoryorder='array', categoryarray=days_order)
             fig_cal.update_layout(height=250, xaxis_title="", yaxis_title="")
-            st.plotly_chart(fig_cal, use_container_width=True)
+            st.plotly_chart(fig_cal, width=1000) # Fixed the width warning
 
             # --- 2. ZONES & INTERVALS ---
             c1, c2 = st.columns(2)
@@ -231,36 +240,36 @@ with tab2:
                 st.subheader("Time in Zones")
                 df_zones = df.melt(id_vars=['Date'], value_vars=['Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'], var_name='Zone', value_name='Minutes')
                 watch_colors = {'Z1_Min':'#00BFFF', 'Z2_Min':'#00CC66', 'Z3_Min':'#FFCC00', 'Z4_Min':'#FF9500', 'Z5_Min':'#FF3B30'}
-                st.plotly_chart(px.bar(df_zones, x='Date', y='Minutes', color='Zone', color_discrete_map=watch_colors), use_container_width=True)
+                st.plotly_chart(px.bar(df_zones, x='Date', y='Minutes', color='Zone', color_discrete_map=watch_colors), width=600)
             
             with c2:
                 st.subheader("Interval Evolution")
                 df_splits = df.melt(id_vars=['Date', 'Type'], value_vars=['Jog_Split_Min', 'Walk_Split_Min'], var_name='Split_Type', value_name='Minutes')
                 df_splits = df_splits[df_splits['Minutes'] > 0]
-                st.plotly_chart(px.bar(df_splits, x='Date', y='Minutes', color='Split_Type', title="Jog vs Walk Ratio", color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}), use_container_width=True)
+                st.plotly_chart(px.bar(df_splits, x='Date', y='Minutes', color='Split_Type', title="Jog vs Walk Ratio", color_discrete_map={'Jog_Split_Min': '#FF9500', 'Walk_Split_Min': '#00BFFF'}), width=600)
 
-            # --- 3. EFFICIENCY (SAFE FROM CRASHES) ---
+            # --- 3. EFFICIENCY (CRASH FIXED) ---
             st.divider()
             st.subheader("Efficiency Analysis")
             
-            # Safe Filtering
             df_move = df[ (df['Speed_Kmh'] > 0) & (df['Avg_HR'] > 0) ].copy()
             
             if not df_move.empty:
-                # Ensure distance is clean for bubble size
-                df_move['Distance_Km'] = df_move['Distance_Km'].clip(lower=0.5) 
+                # Clip distance to ensure bubble size is never 0
+                df_move['Distance_Km'] = df_move['Distance_Km'].clip(lower=0.5)
 
                 st.plotly_chart(px.scatter(
                     df_move, x='Avg_HR', y='Speed_Kmh', color='Type', 
-                    size='Distance_Km', hover_data=['Date', 'Notes'], 
+                    size='Distance_Km', 
+                    # Only show Notes if the column actually exists (Self-Healing logic handles this, but double check)
+                    hover_data=['Date', 'Notes'] if 'Notes' in df_move.columns else ['Date'], 
                     title="Fitness Efficiency (Goal: Top-Left)"
-                ), use_container_width=True)
+                ), width=1000)
             else:
                 st.info("Log runs with Speed & HR to see the efficiency chart.")
 
 with tab3:
     st.markdown("### 💾 Raw Data (MM:SS Formatted)")
-    # Create a display copy to show MM:SS without breaking the math
     df_display = load_data().copy()
     if not df_display.empty:
         time_cols = ['Duration_Min', 'Jog_Split_Min', 'Walk_Split_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']
@@ -268,4 +277,4 @@ with tab3:
             if col in df_display.columns:
                 df_display[col] = df_display[col].apply(format_mmss)
     
-    st.dataframe(df_display, use_container_width=True)
+    st.dataframe(df_display, width=1500)
