@@ -156,8 +156,8 @@ with tab1:
     z1 = parse_time(z_col1.text_input("Zone 1 (Recovery)", placeholder="MM:SS", key=f"z1_{fid}"))
     z2 = parse_time(z_col2.text_input("Zone 2 (Endurance)", placeholder="MM:SS", key=f"z2_{fid}"))
     z3 = parse_time(z_col3.text_input("Zone 3 (Tempo)", placeholder="MM:SS", key=f"z3_{fid}"))
-    z4 = parse_time(z_col4.text_input("Zone 4 (AnTempo)", placeholder="MM:SS", key=f"z4_{fid}"))
-    z5 = parse_time(z_col5.text_input("Zone 5 (VO2 Max Max)", placeholder="MM:SS", key=f"z5_{fid}"))
+    z4 = parse_time(z_col4.text_input("Zone 4 (Threshold)", placeholder="MM:SS", key=f"z4_{fid}"))
+    z5 = parse_time(z_col5.text_input("Zone 5 (VO2 Max)", placeholder="MM:SS", key=f"z5_{fid}"))
 
     total_zones = z1+z2+z3+z4+z5
     if total_zones > 0 and duration > 0:
@@ -281,7 +281,7 @@ Period: {time_range}.
                 }
 
                 sums = df_cardio[['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum()
-                strict_order = ['Zone 0 (Rest)', 'Zone 1 (Recovery)', 'Zone 2 (Endurance)', 'Zone 3 (Tempo)', 'Zone 4 (AnTempo)', 'Zone 5 (VO2 Max Max)']
+                strict_order = ['Zone 0 (Rest)', 'Zone 1 (Recovery)', 'Zone 2 (Endurance)', 'Zone 3 (Tempo)', 'Zone 4 (Threshold)', 'Zone 5 (VO2 Max)']
                 
                 pie_data = pd.DataFrame({
                     'Zone': strict_order,
