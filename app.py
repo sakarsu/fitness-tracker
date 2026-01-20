@@ -280,18 +280,6 @@ Period: {time_range}.
                     'Z1_Min': '#00BFFF', 'Z2_Min': '#00CC66', 'Z3_Min': '#FFCC00', 
                     'Z4_Min': '#FF9500', 'Z5_Min': '#FF3B30'
                 }
-                
-                with z_col1:
-                    df_zones = df_cardio[['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum()
-                    df_zones = df_zones[df_zones['Minutes'] > 0]
-                    
-                    fig_bar = px.bar(
-                        df_zones, x='Date', y='Minutes', color='Zone', 
-                        color_discrete_map=watch_colors,
-                        title="Daily Cardio Load"
-                    )
-                    fig_bar.update_xaxes(type='date', tickformat="%b %d, %Y")
-                    st.plotly_chart(fig_bar, use_container_width=True)
 
                 with z_col2:
                     sums = df_cardio[['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum()
