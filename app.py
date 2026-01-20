@@ -282,7 +282,7 @@ Period: {time_range}.
                 }
                 
                 with z_col1:
-                    df_zones = df_cardio.melt(id_vars=['Date'], value_vars=['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'], var_name='Zone', value_name='Minutes')
+                    df_zones = df_cardio[['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum()
                     df_zones = df_zones[df_zones['Minutes'] > 0]
                     
                     fig_bar = px.bar(
