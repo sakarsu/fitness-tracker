@@ -272,9 +272,7 @@ Period: {time_range}.
             
             if df_cardio.empty:
                 st.info("No Cardio workouts found in this period.")
-            else:
-                z_col1, z_col2 = st.columns([2, 1])
-                
+            else:                
                 watch_colors = {
                     'Z0_Min': '#D3D3D3',
                     'Z1_Min': '#00BFFF', 'Z2_Min': '#00CC66', 'Z3_Min': '#FFCC00', 
@@ -306,7 +304,7 @@ Period: {time_range}.
                         customdata=pie_data[['Formatted']],
                         sort=False 
                     )
-                    fig_pie.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5))
+                    fig_pie.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
                     st.plotly_chart(fig_pie, use_container_width=True)
 
             st.divider()
