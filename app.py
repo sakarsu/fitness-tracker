@@ -272,42 +272,42 @@ Period: {time_range}.
             
             if df_cardio.empty:
                 st.info("No Cardio workouts found in this period.")
-            else:                
+            else:
+                # REVISION: Removed columns and 'with z_col2' block to use full width
                 watch_colors = {
                     'Z0_Min': '#D3D3D3',
                     'Z1_Min': '#00BFFF', 'Z2_Min': '#00CC66', 'Z3_Min': '#FFCC00', 
                     'Z4_Min': '#FF9500', 'Z5_Min': '#FF3B30'
                 }
 
-                with z_col2:
-                    sums = df_cardio[['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum()
-                    strict_order = ['Zone 0 (Rest)', 'Zone 1 (Hafif)', 'Zone 2 (Yoğun)', 'Zone 3 (Aerobik)', 'Zone 4 (Anaerobik)', 'Zone 5 (VO2)']
-                    
-                    pie_data = pd.DataFrame({
-                        'Zone': strict_order,
-                        'Minutes': sums.values,
-                        'ColorKey': ['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']
-                    })
-                    pie_data = pie_data[pie_data['Minutes'] > 0]
-                    pie_data['Formatted'] = pie_data['Minutes'].apply(format_mmss)
-                    
-                    fig_pie = px.pie(
-                        pie_data, values='Minutes', names='Zone', color='ColorKey',
-                        color_discrete_map=watch_colors, hole=0.4,
-                        category_orders={'Zone': strict_order},
-                        title=f"Total: {format_mmss(df_cardio['Duration_Min'].sum())}"
-                    )
-                    
-                    fig_pie.update_traces(
-                        textinfo='percent',
-                        hovertemplate="<b>%{label}</b><br>Time: %{customdata[0]}<br>Ratio: %{percent}",
-                        customdata=pie_data[['Formatted']],
-                        sort=False 
-                    )
-                    fig_pie.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
-                    st.plotly_chart(fig_pie, use_container_width=True)
-
-            st.divider()
+                sums = df_cardio[['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum()
+                strict_order = ['Zone 0 (Rest)', 'Zone 1 (Hafif)', 'Zone 2 (Yoğun)', 'Zone 3 (Aerobik)', 'Zone 4 (Anaerobik)', 'Zone 5 (VO2)']
+                
+                pie_data = pd.DataFrame({
+                    'Zone': strict_order,
+                    'Minutes': sums.values,
+                    'ColorKey': ['Z0_Min', 'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']
+                })
+                pie_data = pie_data[pie_data['Minutes'] > 0]
+                pie_data['Formatted'] = pie_data['Minutes'].apply(format_mmss)
+                
+                fig_pie = px.pie(
+                    pie_data, values='Minutes', names='Zone', color='ColorKey',
+                    color_discrete_map=watch_colors, hole=0.4,
+                    category_orders={'Zone': strict_order},
+                    title=f"Total: {format_mmss(df_cardio['Duration_Min'].sum())}"
+                )
+                
+                fig_pie.update_traces(
+                    textinfo='percent',
+                    hovertemplate="<b>%{label}</b><br>Time: %{customdata[0]}<br>Ratio: %{percent}",
+                    customdata=pie_data[['Formatted']],
+                    sort=False 
+                )
+                # Legend
+                fig_pie.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                
+                st.plotly_chart(fig_pie, use_container_width=True)
 
             # --- 2. INTERVALS & EFFICIENCY ---
             c1, c2 = st.columns(2)
