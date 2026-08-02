@@ -7,65 +7,107 @@ from datetime import date, datetime, timedelta
 import time
 
 # --- 1. CONFIG & GOOGLE SHEETS ---
-st.set_page_config(page_title="Cloud Fitness v22", layout="wide")
+
+st.set_page_config(page_title="Cloud Fitness v19", layout="wide")
+
+
+def get_google_client():
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    creds_dict = dict(st.secrets["gcp_service_account"])
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        creds_dict,
+        scope
+    )
+
+    return gspread.authorize(creds)
+
 
 def get_google_sheet():
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    return client.open("Workout_DB").sheet1
+    client = get_google_client()
+
+    # Change this to the exact title displayed in Google Drive.
+    spreadsheet = client.open("Workout_DB")
+
+    return spreadsheet.sheet1
+
 
 def load_data():
     try:
         sheet = get_google_sheet()
         data = sheet.get_all_records()
+
+        st.caption(
+            f"Connected to: {sheet.spreadsheet.title} → "
+            f"Worksheet: {sheet.title}"
+        )
+
         df = pd.DataFrame(data)
-        
-        # Self-Healing Columns
+
         expected_cols = [
-            'Date', 'Type', 'Sub_Category', 'Duration_Min', 'Distance_Km', 
-            'Speed_Kmh', 'Avg_HR', 'Jog_Split_Min', 'Walk_Split_Min', 
-            'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min', 'Notes'
+            "Date", "Type", "Sub_Category", "Duration_Min",
+            "Distance_Km", "Speed_Kmh", "Avg_HR",
+            "Jog_Split_Min", "Walk_Split_Min",
+            "Z1_Min", "Z2_Min", "Z3_Min", "Z4_Min",
+            "Z5_Min", "Notes"
         ]
-        
+
         if df.empty:
+            st.warning(
+                "Google Sheet was opened successfully, but no data rows "
+                "were returned."
+            )
             return pd.DataFrame(columns=expected_cols)
 
         for col in expected_cols:
             if col not in df.columns:
-                df[col] = "" if col in ['Notes', 'Type', 'Sub_Category'] else 0.0
+                df[col] = (
+                    ""
+                    if col in ["Notes", "Type", "Sub_Category"]
+                    else 0.0
+                )
 
-        # Type conversion & Cleaning
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.normalize()
-        
+        df["Date"] = pd.to_datetime(
+            df["Date"],
+            errors="coerce"
+        )
+
         numeric_cols = [
-            'Duration_Min', 'Distance_Km', 'Speed_Kmh', 'Avg_HR', 
-            'Jog_Split_Min', 'Walk_Split_Min', 
-            'Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min'
+            "Duration_Min", "Distance_Km", "Speed_Kmh", "Avg_HR",
+            "Jog_Split_Min", "Walk_Split_Min",
+            "Z1_Min", "Z2_Min", "Z3_Min", "Z4_Min", "Z5_Min"
         ]
-        for col in numeric_cols:
-            df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-        
-        # Zone 0 Calculation
-        zone_sum = df[['Z1_Min', 'Z2_Min', 'Z3_Min', 'Z4_Min', 'Z5_Min']].sum(axis=1)
-        df['Z0_Min'] = (df['Duration_Min'] - zone_sum).clip(lower=0)
-                
-        return df
-    except Exception:
-        return pd.DataFrame()
 
-def save_workout(entry):
-    sheet = get_google_sheet()
-    row = [
-        str(entry['Date']), entry['Type'], entry['Sub_Category'],
-        entry['Duration_Min'], entry['Distance_Km'], entry['Speed_Kmh'],
-        entry['Avg_HR'], entry['Jog_Split_Min'], entry['Walk_Split_Min'],
-        entry['Z1_Min'], entry['Z2_Min'], entry['Z3_Min'], entry['Z4_Min'], entry['Z5_Min'],
-        entry['Notes']
-    ]
-    sheet.append_row(row)
+        for col in numeric_cols:
+            df[col] = (
+                df[col]
+                .astype(str)
+                .str.replace(",", ".", regex=False)
+            )
+
+            df[col] = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            ).fillna(0.0)
+
+        zone_sum = df[
+            ["Z1_Min", "Z2_Min", "Z3_Min", "Z4_Min", "Z5_Min"]
+        ].sum(axis=1)
+
+        df["Z0_Min"] = (
+            df["Duration_Min"] - zone_sum
+        ).clip(lower=0)
+
+        return df
+
+    except Exception as error:
+        st.error("Google Sheets data could not be loaded.")
+        st.exception(error)
+        return pd.DataFrame()
 
 # --- HELPERS ---
 def parse_time(input_str):
